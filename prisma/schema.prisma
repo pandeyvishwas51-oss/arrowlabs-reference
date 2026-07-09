@@ -1,0 +1,252 @@
+// ArrowLabs schema — creative OS for commerce.
+// Provider: SQLite (dev). Strings used in place of enums (SQLite has no enums).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ===== Accounts & auth (NextAuth-compatible) =====
+
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  name          String?
+  image         String?
+  emailVerified DateTime?
+  passwordHash  String?   // set when the user registers with email + password
+  role          String    @default("member") // owner | admin | member (within org)
+
+  // Company membership — trial + credits live on the Organization, not the user.
+  orgId         String?
+  org           Organization? @relation(fields: [orgId], references: [id], onDelete: SetNull)
+
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  accounts      Account[]
+  sessions      Session[]
+  apiKeys       ApiKey[]
+  usageEvents   UsageEvent[]
+  campaigns     Campaign[]
+}
+
+// ===== Organization (company) — keyed by email domain =====
+// One org per company domain. The free trial is granted ONCE per org, so once a
+// company's trial is used it is used for everyone at that domain.
+
+model Organization {
+  id             String    @id @default(cuid())
+  domain         String    @unique // e.g. "opptra.com"
+  name           String?           // company name
+  website        String?
+  brandName      String?
+  brandData      Json?             // arbitrary brand profile (colors, voice, etc.)
+  plan           String    @default("trial") // trial | pro | agency | expired
+  trialUsed      Boolean   @default(false)
+  trialStartedAt DateTime?
+  trialEndsAt    DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  users          User[]
+  wallet         Wallet?
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+// ===== Wallet / credits ledger =====
+
+model Wallet {
+  id           String              @id @default(cuid())
+  orgId        String              @unique
+  org          Organization        @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  balance      Int                 @default(0)
+  lifetimeSpent Int                @default(0)
+  createdAt    DateTime            @default(now())
+  updatedAt    DateTime            @updatedAt
+  transactions CreditTransaction[]
+}
+
+model CreditTransaction {
+  id           String   @id @default(cuid())
+  walletId     String
+  wallet       Wallet   @relation(fields: [walletId], references: [id], onDelete: Cascade)
+  amount       Int      // positive = credit, negative = debit
+  type         String   // grant | debit | topup | refund | adjustment
+  reason       String?
+  balanceAfter Int
+  metadata     Json?
+  createdAt    DateTime @default(now())
+}
+
+// ===== API keys (programmatic access) =====
+
+model ApiKey {
+  id         String    @id @default(cuid())
+  userId     String
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name       String
+  prefix     String    // shown to user, e.g. "al_live_ab12"
+  hashedKey  String    @unique
+  lastUsedAt DateTime?
+  revoked    Boolean   @default(false)
+  createdAt  DateTime  @default(now())
+}
+
+// ===== Usage metering =====
+
+model UsageEvent {
+  id         String   @id @default(cuid())
+  userId     String?
+  user       User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  orgId      String?
+  campaignId String?
+  kind       String   // scrape | keywords | competitors | listing | angles | image | video
+  credits    Int      @default(0)
+  provider   String?
+  model      String?
+  status     String   @default("ok") // ok | failed
+  meta       Json?
+  createdAt  DateTime @default(now())
+
+  @@index([userId])
+  @@index([orgId])
+  @@index([kind])
+}
+
+// ===== Analytics events (traffic, auth) =====
+
+model Event {
+  id        String   @id @default(cuid())
+  type      String   // pageview | signin | signup | logout | api
+  userId    String?
+  orgId     String?
+  path      String?
+  referrer  String?
+  country   String?
+  ua        String?
+  meta      Json?
+  createdAt DateTime @default(now())
+
+  @@index([type])
+  @@index([createdAt])
+}
+
+// ===== Marketing capture =====
+
+model Subscriber {
+  id        String     @id @default(cuid())
+  email     String     @unique
+  source    String     @default("landing_cta")
+  status    String     @default("pending") // pending | activated | unsubscribed
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+  campaigns Campaign[]
+}
+
+// ===== Campaigns / generated assets =====
+
+model Campaign {
+  id           String      @id @default(cuid())
+  asin         String
+  productName  String?
+  marketplace  String      @default("US")
+  status       String      @default("pending") // pending | scraping | generating | completed | failed
+  source       String? // landing_cta | api | manual | studio
+  inputUrl     String?
+  userId       String?
+  user         User?       @relation(fields: [userId], references: [id], onDelete: SetNull)
+  orgId        String?
+  subscriberId String?
+  subscriber   Subscriber? @relation(fields: [subscriberId], references: [id])
+  assets       Asset[]
+  keywords     Keyword[]
+  scrapedData  Json? // raw scraped product + reviews
+  brandDna     Json? // synthesized brand DNA (positioning, ICP, sentiment, return reasons)
+  listing      Json? // generated title/bullets/A+
+  angles       Json? // generated ad angles
+  progress     Json? // live job progress: { percent, stage, steps[], images{done,total} }
+  error        String?
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+
+  @@index([userId])
+  @@index([orgId])
+  @@index([asin])
+  @@index([createdAt])
+  @@index([orgId, createdAt])
+}
+
+model Asset {
+  id         String   @id @default(cuid())
+  campaignId String
+  campaign   Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  type       String   // main_image | lifestyle | infographic | a_plus_module | ad_static | ad_carousel | ugc_video | product_photo
+  lab        String   // ListingLab | AngleLab | PhotoLab | VideoLab
+  prompt     String?
+  promptJson Json?
+  imageUrl   String?
+  videoUrl   String?
+  status     String   @default("pending") // pending | generating | completed | failed
+  metadata   Json?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  // Assets are queried by campaign (detail view) and by status/date (galleries).
+  @@index([campaignId])
+  @@index([status])
+  @@index([campaignId, createdAt])
+}
+
+model Keyword {
+  id           String   @id @default(cuid())
+  campaignId   String
+  campaign     Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  keyword      String
+  searchVolume Int?
+  rank         Int?
+  difficulty   Int?
+  intent       String? // informational | commercial | transactional
+  competitors  Json? // top competitor ASINs
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@unique([campaignId, keyword])
+}

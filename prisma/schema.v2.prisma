@@ -1,0 +1,368 @@
+// ArrowLabs v2 schema (Postgres). This is the target data model from DATA_MODEL.md.
+// It lives beside the live schema.prisma (SQLite) so the running app is untouched
+// until the Phase 0 cutover. Validate with:
+//   npx prisma validate --schema=prisma/schema.v2.prisma
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../node_modules/.prisma/client-v2"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL_V2")
+}
+
+// --- Tenancy -----------------------------------------------------------------
+
+model Organization {
+  id          String    @id @default(cuid())
+  name        String
+  domain      String    @unique
+  plan        String    @default("trial")
+  trialEndsAt DateTime?
+  createdAt   DateTime  @default(now())
+
+  users     User[]
+  brands    Brand[]
+  products  Product[]
+  campaigns Campaign[]
+  ledger    CreditEntry[]
+  apiKeys   ApiKey[]
+}
+
+model User {
+  id           String   @id @default(cuid())
+  orgId        String
+  email        String   @unique
+  role         String   @default("member")
+  passwordHash String?
+  createdAt    DateTime @default(now())
+
+  org Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([orgId])
+}
+
+model Brand {
+  id        String   @id @default(cuid())
+  orgId     String
+  name      String
+  slug      String
+  createdAt DateTime @default(now())
+
+  org      Organization   @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  profiles BrandProfile[]
+  assets   BrandAsset[]
+  products Product[]
+
+  @@unique([orgId, slug])
+  @@index([orgId])
+}
+
+// --- Brand intelligence ------------------------------------------------------
+
+model BrandProfile {
+  id          String   @id @default(cuid())
+  brandId     String
+  version     Int
+  status      String   @default("active")
+  colors      Json
+  fonts       Json
+  voice       String?
+  compliance  Json     @default("{}")
+  logoAssetId String?
+  createdAt   DateTime @default(now())
+
+  brand Brand       @relation(fields: [brandId], references: [id], onDelete: Cascade)
+  logo  BrandAsset? @relation("ProfileLogo", fields: [logoAssetId], references: [id])
+
+  @@unique([brandId, version])
+  @@index([brandId, status])
+}
+
+model BrandAsset {
+  id        String   @id @default(cuid())
+  brandId   String
+  kind      String
+  url       String
+  meta      Json     @default("{}")
+  createdAt DateTime @default(now())
+
+  brand      Brand          @relation(fields: [brandId], references: [id], onDelete: Cascade)
+  usedAsLogo BrandProfile[] @relation("ProfileLogo")
+
+  @@index([brandId, kind])
+}
+
+// --- Category / node intelligence -------------------------------------------
+
+model CategoryNode {
+  id          String  @id @default(cuid())
+  platformKey String
+  externalId  String
+  name        String
+  parentId    String?
+
+  parent    CategoryNode?  @relation("NodeTree", fields: [parentId], references: [id])
+  children  CategoryNode[] @relation("NodeTree")
+  snapshots NodeSnapshot[]
+  products  Product[]
+
+  @@unique([platformKey, externalId])
+  @@index([platformKey])
+}
+
+model NodeSnapshot {
+  id           String    @id @default(cuid())
+  nodeId       String
+  version      Int
+  status       String    @default("building")
+  source       String
+  summary      Json      @default("{}")
+  builtAt      DateTime  @default(now())
+  refreshDueAt DateTime?
+
+  node     CategoryNode  @relation(fields: [nodeId], references: [id], onDelete: Cascade)
+  keywords Keyword[]
+  sellers  BestSeller[]
+  insights NodeInsight[]
+
+  @@unique([nodeId, version])
+  @@index([nodeId, status])
+}
+
+model Keyword {
+  id             String  @id @default(cuid())
+  nodeSnapshotId String
+  term           String
+  volume         Int?
+  intent         String
+  source         String
+  score          Float?
+
+  snapshot NodeSnapshot @relation(fields: [nodeSnapshotId], references: [id], onDelete: Cascade)
+
+  @@index([nodeSnapshotId, intent])
+  @@index([nodeSnapshotId, volume])
+}
+
+model BestSeller {
+  id             String  @id @default(cuid())
+  nodeSnapshotId String
+  asin           String
+  bsr            Int?
+  title          String?
+  brand          String?
+  price          Float?
+  signals        Json    @default("{}")
+
+  snapshot NodeSnapshot @relation(fields: [nodeSnapshotId], references: [id], onDelete: Cascade)
+
+  @@index([nodeSnapshotId, bsr])
+}
+
+model NodeInsight {
+  id             String @id @default(cuid())
+  nodeSnapshotId String
+  kind           String
+  text           String
+  weight         Float  @default(0)
+  evidence       Json   @default("{}")
+
+  snapshot NodeSnapshot @relation(fields: [nodeSnapshotId], references: [id], onDelete: Cascade)
+
+  @@index([nodeSnapshotId, kind])
+}
+
+// --- Product + Listing File --------------------------------------------------
+
+model Product {
+  id             String   @id @default(cuid())
+  orgId          String
+  brandId        String?
+  nodeId         String?
+  sourcePlatform String
+  externalId     String
+  raw            Json
+  scrapedAt      DateTime @default(now())
+
+  org      Organization  @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  brand    Brand?        @relation(fields: [brandId], references: [id])
+  node     CategoryNode? @relation(fields: [nodeId], references: [id])
+  reviews  ReviewInsight[]
+  listings ListingFile[]
+
+  @@unique([sourcePlatform, externalId, orgId])
+  @@index([orgId])
+}
+
+model ReviewInsight {
+  id        String  @id @default(cuid())
+  productId String
+  kind      String
+  text      String?
+  sentiment Float?
+  media     Json    @default("[]")
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([productId, kind])
+}
+
+model ListingFile {
+  id             String   @id @default(cuid())
+  orgId          String
+  productId      String
+  targetPlatform String
+  brandProfileId String?
+  nodeSnapshotId String?
+  payload        Json
+  status         String   @default("draft")
+  version        Int      @default(1)
+  createdAt      DateTime @default(now())
+
+  product   Product         @relation(fields: [productId], references: [id], onDelete: Cascade)
+  campaigns Campaign[]
+  feedback  Feedback[]
+  publishes PublishRecord[]
+
+  @@index([orgId])
+  @@index([productId])
+}
+
+// --- Generation, jobs, assets ------------------------------------------------
+
+model Campaign {
+  id            String   @id @default(cuid())
+  orgId         String
+  userId        String
+  listingFileId String
+  labs          Json
+  status        String   @default("queued")
+  progress      Json     @default("{}")
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  org         Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  listingFile ListingFile  @relation(fields: [listingFileId], references: [id], onDelete: Cascade)
+  jobs        Job[]
+  assets      Asset[]
+
+  @@index([orgId, status])
+}
+
+model Job {
+  id             String    @id @default(cuid())
+  campaignId     String
+  stage          String
+  moduleKey      String
+  status         String    @default("pending")
+  attempts       Int       @default(0)
+  idempotencyKey String    @unique
+  error          String?
+  startedAt      DateTime?
+  finishedAt     DateTime?
+
+  campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  @@index([campaignId, status])
+  @@index([status, stage])
+}
+
+model Asset {
+  id               String   @id @default(cuid())
+  campaignId       String
+  kind             String
+  moduleKey        String
+  storageKey       String
+  url              String
+  meta             Json     @default("{}")
+  validationStatus String   @default("pending")
+  version          Int      @default(1)
+  createdAt        DateTime @default(now())
+
+  campaign    Campaign           @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  validations ValidationResult[]
+  feedback    Feedback[]
+
+  @@index([campaignId, kind])
+  @@index([validationStatus])
+}
+
+model ValidationResult {
+  id           String   @id @default(cuid())
+  assetId      String
+  validatorKey String
+  pass         Boolean
+  score        Float?
+  issues       Json     @default("[]")
+  hint         String?
+  createdAt    DateTime @default(now())
+
+  asset Asset @relation(fields: [assetId], references: [id], onDelete: Cascade)
+
+  @@index([assetId, validatorKey])
+}
+
+model Feedback {
+  id            String   @id @default(cuid())
+  listingFileId String?
+  assetId       String?
+  userId        String
+  comment       String
+  appliedTo     Int?
+  createdAt     DateTime @default(now())
+
+  listingFile ListingFile? @relation(fields: [listingFileId], references: [id], onDelete: Cascade)
+  asset       Asset?       @relation(fields: [assetId], references: [id], onDelete: Cascade)
+
+  @@index([listingFileId])
+  @@index([assetId])
+}
+
+// --- Publish -----------------------------------------------------------------
+
+model PublishRecord {
+  id            String   @id @default(cuid())
+  listingFileId String
+  publisherKey  String
+  target        String?
+  status        String   @default("pending")
+  response      Json     @default("{}")
+  createdAt     DateTime @default(now())
+
+  listingFile ListingFile @relation(fields: [listingFileId], references: [id], onDelete: Cascade)
+
+  @@index([listingFileId, status])
+}
+
+// --- Metering + access -------------------------------------------------------
+
+model CreditEntry {
+  id           String   @id @default(cuid())
+  orgId        String
+  delta        Int
+  reason       String
+  campaignId   String?
+  balanceAfter Int
+  createdAt    DateTime @default(now())
+
+  org Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([orgId, createdAt])
+}
+
+model ApiKey {
+  id         String    @id @default(cuid())
+  orgId      String
+  userId     String
+  prefix     String
+  hashedKey  String    @unique
+  lastUsedAt DateTime?
+  createdAt  DateTime  @default(now())
+
+  org Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([orgId])
+}

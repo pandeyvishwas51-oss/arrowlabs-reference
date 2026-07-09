@@ -1,0 +1,41 @@
+# ArrowLabs
+
+> ArrowLabs is the AI creative operating system for commerce. From a single Amazon
+> ASIN or product link, it automates your entire e-commerce creative: optimized
+> listings, ranked ad angles, product photography, and UGC video. One coherent brand
+> system, not six disconnected tools. Set it and forget it, with a human on the loop.
+
+## How it works
+A team of specialized AI agents runs the full pipeline end to end. An AI CMO plans the
+campaign, a research agent scrapes reviews and competitors, a strategist ranks ad
+angles, a copywriter writes the listing, and imagery and video agents render the
+creative. A shared Brand Brain keeps every asset on-brand, and a human stays on the
+loop to approve. Paste one link, walk away, come back to a launched campaign.
+
+## The labs
+- ListingLab: Amazon titles, bullets, and A+ content from scraped reviews and competitors.
+- AngleLab: ranked, testable ad angles mapped to your ideal customer profile.
+- PhotoLab: studio-grade product and lifestyle photography, no photo shoot required.
+- VideoLab: scroll-stopping UGC-style video with AI voiceover.
+
+## Who it is for
+Amazon and marketplace sellers, D2C brands, and agencies who need listings, ad
+creative, product photos, and video generated from one brand system.
+
+## Pricing
+Every plan starts with a 7-day completely free trial, unlimited generation, no credit
+card required. After the trial, usage runs on a shared company credit wallet with paid
+top-ups. Company (corporate) email required. Teams share one workspace, wallet, and
+brand profile per email domain.
+
+## Company
+ArrowLabs is built by ThreeArrow AI, an applied-AI company for commerce. The ThreeArrow
+AI ecosystem also includes ArrowCrawl.
+
+## Links
+- Home: https://arrowlabs.art/
+- Features: https://arrowlabs.art/features
+- Showcase: https://arrowlabs.art/showcase
+- Pricing: https://arrowlabs.art/pricing
+- About: https://arrowlabs.art/about
+- Sign in: https://arrowlabs.art/login
